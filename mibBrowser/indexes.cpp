@@ -1,0 +1,230 @@
+#include "indexes.h"
+#include "ui_indexes.h"
+#include <QDebug>
+#include <QClipboard>
+
+Indexes::Indexes(QWidget *parent) :
+    QWidget(parent),
+    ui(new Ui::Indexes)
+{
+    ui->setupUi(this);
+}
+
+Indexes::~Indexes()
+{
+    delete ui;
+}
+
+/**
+ * @brief Вывод таблицы
+ * @param table Результат snmpwalk по oid таблицы
+ * @param oid OID таблицы
+ */
+void Indexes::getTable(QString tableSnmp, QString tableOid, QString translatedTableOid, QStringList variablesIndexes)
+{
+    this->tableOid = tableOid;
+    qDebug() << tableOid;
+
+    QStringList tmpList;
+    QString entryOid = tableOid + ".1";
+    this->setWindowTitle(translatedTableOid);
+
+    QList<QList<QString>> table;
+    for (QString item : tableSnmp.split("\n")){
+        if (item.indexOf(entryOid) == -1 || item == "") continue;
+        table.append(item.split(" = "));
+    }
+    for (int i = 0; i < table.length(); i++){
+        table[i][0] = table[i][0].remove(entryOid + ".");
+    }
+
+    QList<QList<QString>> result;
+    QList<QString> tmp;
+    QString temp, firstVar = getIndex(table[0][0])[0];
+    for (QList<QString> item : table){
+        temp = getIndex(item[0])[0];
+        if (firstVar != temp) break;
+        tmp.append(getIndex(item[0])[1]);
+        tmp.append("");
+        result.append(tmp);
+        tmp.clear();
+    }
+    for (QList<QString> item : table){
+        for (int i = 0; i < result.length(); i++){
+            if (getIndex(item[0])[1] == result[i][0]){
+                result[i][1] += getIndex(item[0])[0] + " = " + item[1] + "; ";
+            }
+        }
+    }
+
+    int rows = result.length();
+    int columns = (result[0][1].split("; ")).length() - 1;
+    this->rows = rows;
+    this->columns = columns;
+    ui->table->setRowCount(rows);
+    ui->table->setColumnCount(variablesIndexes.length());
+    QStringList headers;
+    for (int i = 0; i < rows; i++) headers.append(result[i][0]);
+    ui->table->setVerticalHeaderLabels(headers);
+    this->verticalHeaders = headers;
+    ui->table->setHorizontalHeaderLabels(variablesIndexes);
+    this->horizontalHeaders = variablesIndexes;
+    ui->table->setShowGrid(false);
+    ui->table->resizeRowsToContents();
+    ui->table->resizeColumnsToContents();
+    ui->table->setStyleSheet("border: none;");
+
+    int position;
+    QString nameRow;
+    QString nameColumn;
+    QStringList nameColumnTmp;
+    for (int row = 0; row < rows; row++){
+        nameRow = result[row][0];
+        tmp = result[row][1].split("; ");
+        for (int column = 0; column < tmp.length() - 1; column++){
+            nameColumn = tmp[column].split(" = ")[0];
+            nameColumnTmp = nameColumn.split(":");
+            nameColumn = nameColumnTmp[nameColumnTmp.length() - 1];
+            temp = tmp[column].split(" = ")[1];
+            if (temp == "") continue;
+            position = temp.indexOf(":");
+            temp = temp.remove(0, position + 1);
+            QTableWidgetItem *tableItem = new QTableWidgetItem(temp);
+//            tableItem->setData(Qt::ToolTipRole, QString::number(this->horizontalHeaders.indexOf(nameColumn) + 1) + "." + nameRow);
+//            ui->table->setItem(this->verticalHeaders.indexOf(nameRow), this->horizontalHeaders.indexOf(nameColumn), tableItem);
+            tableItem->setData(Qt::ToolTipRole, nameColumn + "." + nameRow);
+            ui->table->setItem(this->verticalHeaders.indexOf(nameRow), nameColumn.toInt() - 1, tableItem);
+        }
+    }
+
+    for (int i = 0; i < ui->table->rowCount(); i++){
+        for (int j = 0 ; j < ui->table->columnCount(); j++){
+            if (!ui->table->item(i, j))
+                ui->table->setItem(i, j, new QTableWidgetItem("Not available"));
+        }
+    }
+}
+
+/**
+ * @brief Разделение индекса и переменной
+ * @param str Переменная и индекс разделенные точкой
+ * @return Переменная и индекс
+ */
+QList<QString> Indexes::getIndex(QString str)
+{
+    int position = str.indexOf(".");
+    QList<QString> result;
+    result.append(str.left(position));
+    result.append(str.remove(0, position + 1));
+    return result;
+}
+
+/**
+ * @brief Транспонирование таблицы
+ */
+void Indexes::on_trans_clicked()
+{
+    bool isRows = false;
+    int min, max;
+    if (ui->table->rowCount() > ui->table->columnCount()){
+        max = ui->table->rowCount();
+        min = ui->table->columnCount();
+        isRows = true;
+    }
+    else {
+        max = ui->table->columnCount();
+        min = ui->table->rowCount();
+        isRows = false;
+    }
+
+    QTableWidget *tmp = new QTableWidget();
+    tmp->setColumnCount(max);
+    tmp->setRowCount(max);
+    ui->table->setRowCount(max);
+    ui->table->setColumnCount(max);
+
+    if (isRows){
+        ui->table->setRowCount(max);
+
+        for (int i = 0; i < min; i++){
+            for (int j = 0; j < max; j++){
+                QTableWidgetItem *tmpItem = new QTableWidgetItem();
+                tmpItem->setText(ui->table->item(j, i)->text());
+                tmpItem->setData(Qt::ToolTipRole, (ui->table->item(j, i)->data(Qt::ToolTipRole)).toString());
+                tmp->setItem(i, j, tmpItem);
+            }
+        }
+
+        ui->table->clear();
+
+        for (int i = 0; i < min; i++){
+            for (int j = 0; j < max; j++){
+                QTableWidgetItem *tmpItem = new QTableWidgetItem();
+                tmpItem->setText(tmp->item(i, j)->text());
+                tmpItem->setData(Qt::ToolTipRole, (tmp->item(i, j)->data(Qt::ToolTipRole)).toString());
+                ui->table->setItem(i, j, tmpItem);
+            }
+        }
+
+        ui->table->setRowCount(min);
+        ui->table->setColumnCount(max);
+    }
+    else {
+        ui->table->setColumnCount(max);
+
+        for (int i = 0; i < max; i++){
+            for (int j = 0; j < min; j++){
+                QTableWidgetItem *tmpItem = new QTableWidgetItem(ui->table->item(j, i)->text());
+                tmpItem->setData(Qt::ToolTipRole, (ui->table->item(j, i)->data(Qt::ToolTipRole)).toString());
+                tmp->setItem(i, j, tmpItem);
+            }
+        }
+
+        ui->table->clear();
+
+        for (int i = 0; i < max; i++){
+            for (int j = 0; j < min; j++){
+                QTableWidgetItem *tmpItem = new QTableWidgetItem(tmp->item(i, j)->text());
+                tmpItem->setData(Qt::ToolTipRole, (tmp->item(i, j)->data(Qt::ToolTipRole)).toString());
+                ui->table->setItem(i, j, tmpItem);
+            }
+        }
+
+        ui->table->setRowCount(max);
+        ui->table->setColumnCount(min);
+    }
+
+    QStringList temp;
+    ui->table->setHorizontalHeaderLabels(temp);
+    ui->table->setVerticalHeaderLabels(temp);
+    ui->table->setHorizontalHeaderLabels(this->verticalHeaders);
+    ui->table->setVerticalHeaderLabels(this->horizontalHeaders);
+
+    temp = this->horizontalHeaders;
+    this->horizontalHeaders = this->verticalHeaders;
+    this->verticalHeaders = temp;
+}
+
+/**
+ * @brief Коипрование OID выбранного элемента таблицы
+ */
+void Indexes::on_copyOid_clicked()
+{
+    QString oid;
+    if (ui->table->currentItem()) {
+        oid = this->tableOid + ".1." + (ui->table->currentItem()->data(Qt::ToolTipRole)).toString();
+    }
+    else oid = "";
+    QClipboard *clipboard = QApplication::clipboard();
+    clipboard->setText(oid);
+
+    emit sendOid(oid);
+}
+
+/**
+ * @brief Функция для очищения таблицы перед ее открытием
+ */
+void Indexes::deleteInfoFromTable()
+{
+    ui->table->clear();
+}
